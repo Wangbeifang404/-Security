@@ -140,8 +140,21 @@ public class LibraryManager {
         System.out.print("请输入 ISBN 编号：");
         String isbn = scanner.nextLine();
         System.out.print("请输入出版年份：");
-        int year = Integer.parseInt(scanner.nextLine());
+        
+        int year = -1;
+        while (year < 0) {
+            try {
+                System.out.print("请输入出版年份：");
+                year = Integer.parseInt(scanner.nextLine());
+                if (year < 0) {
+                    System.out.println("⚠️ 出版年份必须为非负整数！");
+                }   
+            } catch (NumberFormatException e) {
+                System.out.println("⚠️ 输入错误，请输入数字！");
+            }
+        }
 
+        
         Book book = new Book(title, author, isbn, year);
         library.addBook(book);
     }
