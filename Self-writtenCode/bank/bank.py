@@ -31,6 +31,8 @@ class Account:
                 f"从 {self.account_number} 转入: +{amount} 元，当前余额: {target_account.balance} 元")
             return True
         return False
+    def change_pin(self, new_pin):
+        self.pin = new_pin
 
 
 class Bank:
@@ -41,29 +43,25 @@ class Bank:
     def load_accounts(self):
         if os.path.exists('accounts.txt'):
             try:
-                with open('accounts.txt', 'r', encoding='utf-8') as file:
+                with open('accounts.txt', 'r') as file:
                     for line in file:
                         parts = line.strip().split(',')
-                        if len(parts) < 3:
-                            continue  # 跳过格式异常行
                         account_number = parts[0]
                         pin = parts[1]
                         balance = float(parts[2])
                         account = Account(account_number, pin, balance)
-                    # 处理交易记录
-                        if len(parts) > 3:
-                            account.transaction_history = parts[3:]
+                        for i in range(3, len(parts)):
+                            account.transaction_history.append(parts[i])
                         self.accounts[account_number] = account
             except Exception as e:
                 print(f"加载账户数据时出错: {e}")
 
     def save_accounts(self):
         try:
-            with open('accounts.txt', 'w', encoding='utf-8') as file:
+            with open('accounts.txt', 'w') as file:
                 for account in self.accounts.values():
-                    line = f"{account.account_number},{account.pin},{account.balance}"
-                    if account.transaction_history:
-                        line += ',' + ','.join(account.transaction_history)
+                    line = f"{account.account_number},{account.pin},{account.balance},"
+                    line += ','.join(account.transaction_history)
                     file.write(line + '\n')
         except Exception as e:
             print(f"保存账户数据时出错: {e}")
@@ -87,6 +85,13 @@ class Bank:
 
     def get_account(self, account_number):
         return self.accounts.get(account_number)
+    
+    def delete_account(self, account_number):
+        if account_number in self.accounts:
+            del self.accounts[account_number]
+            self.save_accounts()
+            return True
+        return False
 
 
 def main():
@@ -120,7 +125,10 @@ def main():
             print("2. 取款")
             print("3. 转账")
             print("4. 查看交易记录")
-            print("5. 退出登录")
+            print("5. 修改密码")
+            print("6. 退出登录")
+            print("7. 注销账户")
+          
             sub_choice = input("请输入你的选择: ")
 
             if sub_choice == '1':
@@ -154,8 +162,19 @@ def main():
                 for record in current_account.transaction_history:
                     print(record)
             elif sub_choice == '5':
+                new_pin = input("请输入新密码: ")
+                current_account.change_pin(new_pin)
+                bank.save_accounts()
+                print("密码修改成功！")
+            elif sub_choice == '6':
                 current_account = None
                 print("已退出登录。")
+            elif sub_choice == '7':
+                confirm = input("确认注销账户？该操作不可恢复 (yes/no): ")
+                if confirm.lower() == 'yes':
+                    if bank.delete_account(current_account.account_number):
+                        print("账户已注销。感谢使用本系统！")
+                        current_account = None
             else:
                 print("无效的选择，请重新输入。")
 
