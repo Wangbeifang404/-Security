@@ -16,20 +16,13 @@ class Account:
         return False
     
     def withdraw(self, amount):
-        if amount <= 0:
-            self.transaction_history.append(f"无效取款金额: {amount} 元")
-            return False
-        if amount > self.balance:
-            self.transaction_history.append(f"取款失败: 余额不足，尝试取款 {amount} 元，当前余额: {self.balance} 元")
-            return False
-        self.balance -= amount
-        self.transaction_history.append(f"取款: -{amount} 元，当前余额: {self.balance} 元")
-        return True
+        if 0 < amount <= self.balance:
+            self.balance -= amount
+            self.transaction_history.append(f"取款: -{amount} 元，当前余额: {self.balance} 元")
+            return True
+        return False
 
     def transfer(self, target_account, amount):
-        if amount <= 0:
-            self.transaction_history.append(f"⚠️ 无效转账金额: {amount} 元")
-            return False
         if self.withdraw(amount):
             target_account.deposit(amount)
             self.transaction_history.append(
@@ -44,29 +37,33 @@ class Bank:
     def __init__(self):
         self.accounts = {}
         self.load_accounts()
-
+        
     def load_accounts(self):
         if os.path.exists('accounts.txt'):
             try:
-                with open('accounts.txt', 'r') as file:
+                with open('accounts.txt', 'r', encoding='utf-8') as file:
                     for line in file:
                         parts = line.strip().split(',')
+                        if len(parts) < 3:
+                            continue  # 跳过格式异常行
                         account_number = parts[0]
                         pin = parts[1]
                         balance = float(parts[2])
                         account = Account(account_number, pin, balance)
-                        for i in range(3, len(parts)):
-                            account.transaction_history.append(parts[i])
+                    # 处理交易记录
+                        if len(parts) > 3:
+                            account.transaction_history = parts[3:]
                         self.accounts[account_number] = account
             except Exception as e:
                 print(f"加载账户数据时出错: {e}")
 
     def save_accounts(self):
         try:
-            with open('accounts.txt', 'w') as file:
+            with open('accounts.txt', 'w', encoding='utf-8') as file:
                 for account in self.accounts.values():
-                    line = f"{account.account_number},{account.pin},{account.balance},"
-                    line += ','.join(account.transaction_history)
+                    line = f"{account.account_number},{account.pin},{account.balance}"
+                    if account.transaction_history:
+                        line += ',' + ','.join(account.transaction_history)
                     file.write(line + '\n')
         except Exception as e:
             print(f"保存账户数据时出错: {e}")
