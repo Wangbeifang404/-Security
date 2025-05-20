@@ -79,7 +79,9 @@ class Library {
             }
         }
     }
-
+    /**
+     * 模拟保存操作并退出系统（当前未实现实际持久化功能）。
+     */
     public void saveAndExit() {
         // 模拟保存功能
         System.out.println("💾 正在保存数据...（模拟）");
