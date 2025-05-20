@@ -14,15 +14,22 @@ class Account:
             self.transaction_history.append(f"存款: +{amount} 元，当前余额: {self.balance} 元")
             return True
         return False
-
+    
     def withdraw(self, amount):
-        if 0 < amount <= self.balance:
-            self.balance -= amount
-            self.transaction_history.append(f"取款: -{amount} 元，当前余额: {self.balance} 元")
-            return True
-        return False
+        if amount <= 0:
+            self.transaction_history.append(f"无效取款金额: {amount} 元")
+            return False
+        if amount > self.balance:
+            self.transaction_history.append(f"取款失败: 余额不足，尝试取款 {amount} 元，当前余额: {self.balance} 元")
+            return False
+        self.balance -= amount
+        self.transaction_history.append(f"取款: -{amount} 元，当前余额: {self.balance} 元")
+        return True
 
     def transfer(self, target_account, amount):
+        if amount <= 0:
+            self.transaction_history.append(f"⚠️ 无效转账金额: {amount} 元")
+            return False
         if self.withdraw(amount):
             target_account.deposit(amount)
             self.transaction_history.append(
