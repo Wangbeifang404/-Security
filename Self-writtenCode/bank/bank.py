@@ -14,7 +14,7 @@ class Account:
             self.transaction_history.append(f"存款: +{amount} 元，当前余额: {self.balance} 元")
             return True
         return False
-
+    
     def withdraw(self, amount):
         if 0 < amount <= self.balance:
             self.balance -= amount
@@ -31,13 +31,15 @@ class Account:
                 f"从 {self.account_number} 转入: +{amount} 元，当前余额: {target_account.balance} 元")
             return True
         return False
+    def change_pin(self, new_pin):
+        self.pin = new_pin
 
 
 class Bank:
     def __init__(self):
         self.accounts = {}
         self.load_accounts()
-
+        
     def load_accounts(self):
         if os.path.exists('accounts.txt'):
             try:
@@ -83,6 +85,13 @@ class Bank:
 
     def get_account(self, account_number):
         return self.accounts.get(account_number)
+    
+    def delete_account(self, account_number):
+        if account_number in self.accounts:
+            del self.accounts[account_number]
+            self.save_accounts()
+            return True
+        return False
 
 
 def main():
@@ -116,7 +125,10 @@ def main():
             print("2. 取款")
             print("3. 转账")
             print("4. 查看交易记录")
-            print("5. 退出登录")
+            print("5. 修改密码")
+            print("6. 退出登录")
+            print("7. 注销账户")
+          
             sub_choice = input("请输入你的选择: ")
 
             if sub_choice == '1':
@@ -150,8 +162,19 @@ def main():
                 for record in current_account.transaction_history:
                     print(record)
             elif sub_choice == '5':
+                new_pin = input("请输入新密码: ")
+                current_account.change_pin(new_pin)
+                bank.save_accounts()
+                print("密码修改成功！")
+            elif sub_choice == '6':
                 current_account = None
                 print("已退出登录。")
+            elif sub_choice == '7':
+                confirm = input("确认注销账户？该操作不可恢复 (yes/no): ")
+                if confirm.lower() == 'yes':
+                    if bank.delete_account(current_account.account_number):
+                        print("账户已注销。感谢使用本系统！")
+                        current_account = None
             else:
                 print("无效的选择，请重新输入。")
 
