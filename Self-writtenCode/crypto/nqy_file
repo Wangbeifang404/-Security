@@ -1,158 +1,308 @@
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+from Crypto.Hash import RIPEMD160, HMAC, SHA1, SHA256
+from gmssl.sm4 import CryptSM4, SM4_ENCRYPT, SM4_DECRYPT
+from hashlib import sha1, sha256, sha3_256, pbkdf2_hmac, scrypt
 import struct
 import math
+import os
+from typing import Tuple, Union, Optional
 
-### ===== AES 加解密 =====
-def aes_encrypt(key, data):
-    cipher = AES.new(key, AES.MODE_CBC)
-    ct_bytes = cipher.encrypt(pad(data, AES.block_size))
-    return cipher.iv + ct_bytes
+class CryptoUtils:
+    """密码学工具类，提供统一的加密哈希接口"""
+    
+    @staticmethod
+    def generate_salt(length: int = 16) -> bytes:
+        """生成安全的随机盐值"""
+        return os.urandom(length)
+    
+    @staticmethod
+    def derive_key(password: bytes, salt: bytes, iterations: int = 600000, 
+                  key_length: int = 32) -> bytes:
+        """使用PBKDF2派生密钥"""
+        return pbkdf2_hmac('sha256', password, salt, iterations, key_length)
+    
+    @staticmethod
+    def aes_encrypt(key: bytes, data: bytes) -> bytes:
+        """AES-CBC加密，自动处理填充"""
+        cipher = AES.new(key, AES.MODE_CBC)
+        ct_bytes = cipher.encrypt(pad(data, AES.block_size))
+        return cipher.iv + ct_bytes
+    
+    @staticmethod
+    def aes_decrypt(key: bytes, encrypted_data: bytes) -> bytes:
+        """AES-CBC解密，自动处理填充"""
+        iv = encrypted_data[:AES.block_size]
+        ct = encrypted_data[AES.block_size:]
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        return unpad(cipher.decrypt(ct), AES.block_size)
+    
+    @staticmethod
+    def sm4_encrypt(key: bytes, data: bytes) -> bytes:
+        """SM4-ECB加密，自动处理填充"""
+        padded_data = pad(data, 16)  # SM4块大小为16字节
+        crypt_sm4 = CryptSM4()
+        crypt_sm4.set_key(key, SM4_ENCRYPT)
+        return crypt_sm4.crypt_ecb(padded_data)
+    
+    @staticmethod
+    def sm4_decrypt(key: bytes, encrypted_data: bytes) -> bytes:
+        """SM4-ECB解密，自动处理填充"""
+        crypt_sm4 = CryptSM4()
+        crypt_sm4.set_key(key, SM4_DECRYPT)
+        decrypted = crypt_sm4.crypt_ecb(encrypted_data)
+        return unpad(decrypted, 16)
+    
+    @staticmethod
+    def rc6_encrypt(key: bytes, data: bytes, rounds: int = 20) -> bytes:
+        """
+        自定义RC6加密算法
+        参数:
+            key: 加密密钥(16字节)
+            data: 要加密的数据
+            rounds: 加密轮数(默认20)
+        返回:
+            加密后的数据
+        """
+        # 确保数据是16字节的倍数
+        padded_data = pad(data, 16)
+        
+        # 生成密钥调度表
+        S = CryptoUtils._rc6_key_expansion(key, rounds)
+        
+        # 分块加密
+        encrypted_blocks = []
+        for i in range(0, len(padded_data), 16):
+            block = padded_data[i:i+16]
+            encrypted_block = CryptoUtils._rc6_encrypt_block(block, S)
+            encrypted_blocks.append(encrypted_block)
+        
+        return b''.join(encrypted_blocks)
+    
+    @staticmethod
+    def rc6_decrypt(key: bytes, encrypted_data: bytes, rounds: int = 20) -> bytes:
+        """
+        自定义RC6解密算法
+        参数:
+            key: 解密密钥(16字节)
+            encrypted_data: 要解密的数据
+            rounds: 加密轮数(默认20)
+        返回:
+            解密后的原始数据
+        """
+        # 生成密钥调度表
+        S = CryptoUtils._rc6_key_expansion(key, rounds)
+        
+        # 分块解密
+        decrypted_blocks = []
+        for i in range(0, len(encrypted_data), 16):
+            block = encrypted_data[i:i+16]
+            decrypted_block = CryptoUtils._rc6_decrypt_block(block, S)
+            decrypted_blocks.append(decrypted_block)
+        
+        # 移除填充
+        return unpad(b''.join(decrypted_blocks), 16)
+    
+    @staticmethod
+    def _rc6_key_expansion(key: bytes, rounds: int) -> list:
+        """
+        RC6密钥扩展算法
+        参数:
+            key: 原始密钥
+            rounds: 加密轮数
+        返回:
+            扩展后的密钥调度表S
+        """
+        # 常量定义
+        P32 = 0xB7E15163
+        Q32 = 0x9E3779B9
+        
+        # 将密钥转换为字数组
+        c = max(len(key), 1) // 4
+        L = [0] * c
+        
+        for i in range(len(key)-1, -1, -1):
+            L[i // 4] = (L[i // 4] << 8) + key[i]
+        
+        # 初始化密钥调度表
+        t = 2 * rounds + 4
+        S = [0] * t
+        S[0] = P32
+        
+        for i in range(1, t):
+            S[i] = (S[i-1] + Q32) & 0xFFFFFFFF
+        
+        # 混合密钥
+        A = B = i = j = 0
+        v = 3 * max(t, c)
+        
+        for _ in range(v):
+            A = S[i] = CryptoUtils._rotate_left((S[i] + A + B) & 0xFFFFFFFF, 3)
+            B = L[j] = CryptoUtils._rotate_left((L[j] + A + B) & 0xFFFFFFFF, (A + B) & 0x1F)
+            i = (i + 1) % t
+            j = (j + 1) % c
+        
+        return S
+    
+    @staticmethod
+    def _rc6_encrypt_block(block: bytes, S: list) -> bytes:
+        """
+        RC6块加密
+        参数:
+            block: 16字节的数据块
+            S: 密钥调度表
+        返回:
+            加密后的16字节数据块
+        """
+        # 将输入块分成4个字
+        A, B, C, D = struct.unpack('<4L', block)
+        
+        # 初始变换
+        B = (B + S[0]) & 0xFFFFFFFF
+        D = (D + S[1]) & 0xFFFFFFFF
+        
+        # 主加密轮次
+        for i in range(1, len(S)//2):
+            t = CryptoUtils._rotate_left((B * (2 * B + 1)) & 0xFFFFFFFF, 5)
+            u = CryptoUtils._rotate_left((D * (2 * D + 1)) & 0xFFFFFFFF, 5)
+            A = (CryptoUtils._rotate_left((A ^ t), u & 0x1F) + S[2*i]) & 0xFFFFFFFF
+            C = (CryptoUtils._rotate_left((C ^ u), t & 0x1F) + S[2*i+1]) & 0xFFFFFFFF
+            A, B, C, D = B, C, D, A
+        
+        # 最终变换
+        A = (A + S[-2]) & 0xFFFFFFFF
+        C = (C + S[-1]) & 0xFFFFFFFF
+        
+        # 返回加密后的块
+        return struct.pack('<4L', A, B, C, D)
+    
+    @staticmethod
+    def _rc6_decrypt_block(block: bytes, S: list) -> bytes:
+        """
+        RC6块解密
+        参数:
+            block: 16字节的加密数据块
+            S: 密钥调度表
+        返回:
+            解密后的16字节数据块
+        """
+        # 将输入块分成4个字
+        A, B, C, D = struct.unpack('<4L', block)
+        
+        # 初始逆变换
+        C = (C - S[-1]) & 0xFFFFFFFF
+        A = (A - S[-2]) & 0xFFFFFFFF
+        
+        # 主解密轮次
+        for i in range(len(S)//2-1, 0, -1):
+            A, B, C, D = D, A, B, C
+            t = CryptoUtils._rotate_left((B * (2 * B + 1)) & 0xFFFFFFFF, 5)
+            u = CryptoUtils._rotate_left((D * (2 * D + 1)) & 0xFFFFFFFF, 5)
+            C = (CryptoUtils._rotate_right((C - S[2*i+1]) & 0xFFFFFFFF, t & 0x1F) ^ u) & 0xFFFFFFFF
+            A = (CryptoUtils._rotate_right((A - S[2*i]) & 0xFFFFFFFF, u & 0x1F) ^ t) & 0xFFFFFFFF
+        
+        # 最终逆变换
+        D = (D - S[1]) & 0xFFFFFFFF
+        B = (B - S[0]) & 0xFFFFFFFF
+        
+        # 返回解密后的块
+        return struct.pack('<4L', A, B, C, D)
+    
+    @staticmethod
+    def _rotate_left(val: int, n: int) -> int:
+        """循环左移"""
+        return ((val << n) | (val >> (32 - n))) & 0xFFFFFFFF
+    
+    @staticmethod
+    def _rotate_right(val: int, n: int) -> int:
+        """循环右移"""
+        return ((val >> n) | (val << (32 - n))) & 0xFFFFFFFF
+    
+    @staticmethod
+    def sha1_hash(data: bytes) -> str:
+        """计算SHA1哈希值"""
+        return sha1(data).hexdigest()
+    
+    @staticmethod
+    def sha256_hash(data: bytes) -> str:
+        """计算SHA256哈希值"""
+        return sha256(data).hexdigest()
+    
+    @staticmethod
+    def sha3_hash(data: bytes) -> str:
+        """计算SHA3-256哈希值"""
+        return sha3_256(data).hexdigest()
+    
+    @staticmethod
+    def ripemd160_hash(data: bytes) -> str:
+        """计算RIPEMD160哈希值"""
+        h = RIPEMD160.new()
+        h.update(data)
+        return h.hexdigest()
+    
+    @staticmethod
+    def hmac_sha1(key: bytes, data: bytes) -> str:
+        """计算HMAC-SHA1"""
+        h = HMAC.new(key, digestmod=SHA1)
+        h.update(data)
+        return h.hexdigest()
+    
+    @staticmethod
+    def hmac_sha256(key: bytes, data: bytes) -> str:
+        """计算HMAC-SHA256"""
+        h = HMAC.new(key, digestmod=SHA256)
+        h.update(data)
+        return h.hexdigest()
+    
+    @staticmethod
+    def pbkdf2_derive(password: bytes, salt: bytes, iterations: int = 600000) -> str:
+        """使用PBKDF2派生密钥"""
+        key = pbkdf2_hmac('sha256', password, salt, iterations)
+        return key.hex()
 
-def aes_decrypt(key, enc_data):
-    iv = enc_data[:16]
-    ct = enc_data[16:]
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    return unpad(cipher.decrypt(ct), AES.block_size)
-### ===== SM4 加解密 =====
 
-from gmssl.sm4 import CryptSM4, SM4_ENCRYPT, SM4_DECRYPT
-
-def sm4_encrypt(key, data):
-    crypt_sm4 = CryptSM4()
-    crypt_sm4.set_key(key, SM4_ENCRYPT)
-    return crypt_sm4.crypt_ecb(data)
-
-def sm4_decrypt(key, encrypted_data):
-    crypt_sm4 = CryptSM4()
-    crypt_sm4.set_key(key, SM4_DECRYPT)
-    return crypt_sm4.crypt_ecb(encrypted_data)
-
-### ===== RC6 密钥扩展与加解密 =====
-def rc6_key_schedule(key, w=32, r=20):
-    b = len(key)
-    u = w // 8
-    c = max(1, math.ceil(b / u))
-    L = [0] * c
-    for i in range(b-1, -1, -1):
-        L[i//u] = (L[i//u] << 8) + key[i]
-    Pw = 0xB7E15163
-    Qw = 0x9E3779B9
-    S = [(Pw + i * Qw) & 0xFFFFFFFF for i in range(2 * r + 4)]
-    A = B = i = j = 0
-    v = 3 * max(c, 2 * r + 4)
-    for _ in range(v):
-        A = S[i] = ((S[i] + A + B) << 3 | (S[i] + A + B) >> (w - 3)) & 0xFFFFFFFF
-        B = L[j] = ((L[j] + A + B) << ((A + B) & 0x1F) | (L[j] + A + B) >> (w - ((A + B) & 0x1F))) & 0xFFFFFFFF
-        i = (i + 1) % (2 * r + 4)
-        j = (j + 1) % c
-    return S
-
-def rc6_encrypt_block(pt, S, w=32, r=20):
-    A, B, C, D = struct.unpack('<4L', pt)
-    B = (B + S[0]) & 0xFFFFFFFF
-    D = (D + S[1]) & 0xFFFFFFFF
-    for i in range(1, r + 1):
-        t = (B * (2 * B + 1)) & 0xFFFFFFFF
-        t = ((t << 5) | (t >> 27)) & 0xFFFFFFFF
-        t %= w
-        u = (D * (2 * D + 1)) & 0xFFFFFFFF
-        u = ((u << 5) | (u >> 27)) & 0xFFFFFFFF
-        u %= w
-        A = ((A ^ t) << u | (A ^ t) >> (w - u)) + S[2 * i]
-        A &= 0xFFFFFFFF
-        C = ((C ^ u) << t | (C ^ u) >> (w - t)) + S[2 * i + 1]
-        C &= 0xFFFFFFFF
-        A, B, C, D = B, C, D, A
-    A = (A + S[2 * r + 2]) & 0xFFFFFFFF
-    C = (C + S[2 * r + 3]) & 0xFFFFFFFF
-    return struct.pack('<4L', A, B, C, D)
-
-def rc6_decrypt_block(ct, S, w=32, r=20):
-    A, B, C, D = struct.unpack('<4L', ct)
-    C = (C - S[2 * r + 3]) & 0xFFFFFFFF
-    A = (A - S[2 * r + 2]) & 0xFFFFFFFF
-    for i in range(r, 0, -1):
-        A, B, C, D = D, A, B, C
-        u = (D * (2 * D + 1)) & 0xFFFFFFFF
-        u = ((u << 5) | (u >> 27)) & 0xFFFFFFFF
-        u %= w
-        t = (B * (2 * B + 1)) & 0xFFFFFFFF
-        t = ((t << 5) | (t >> 27)) & 0xFFFFFFFF
-        t %= w
-        C = (((C - S[2 * i + 1]) >> t | (C - S[2 * i + 1]) << (w - t)) ^ u) & 0xFFFFFFFF
-        A = (((A - S[2 * i]) >> u | (A - S[2 * i]) << (w - u)) ^ t) & 0xFFFFFFFF
-    B = (B - S[0]) & 0xFFFFFFFF
-    D = (D - S[1]) & 0xFFFFFFFF
-    return struct.pack('<4L', A, B, C, D)
-from hashlib import sha1, sha256, sha3_256, pbkdf2_hmac
-from Crypto.Hash import RIPEMD160, HMAC, SHA1, SHA256
-
-def hash_sha1(data):
-    return sha1(data).hexdigest()
-
-def hash_sha256(data):
-    return sha256(data).hexdigest()
-
-def hash_sha3(data):
-    return sha3_256(data).hexdigest()
-
-def hash_ripemd160(data):
-    h = RIPEMD160.new()
-    h.update(data)
-    return h.hexdigest()
-
-def hmac_sha1(key, data):
-    h = HMAC.new(key, digestmod=SHA1)
-    h.update(data)
-    return h.hexdigest()
-
-def hmac_sha256(key, data):
-    h = HMAC.new(key, digestmod=SHA256)
-    h.update(data)
-    return h.hexdigest()
-
-def hash_pbkdf2(password, salt, iterations=100000):
-    key = pbkdf2_hmac('sha256', password, salt, iterations)
-    return key.hex()
-sample_data = b"HelloWorld123456"
-sample_key = b"thisisakey123456"
-sample_salt = b"salt1234"
-
-# AES
-aes_enc = aes_encrypt(sample_key, sample_data)
-aes_dec = aes_decrypt(sample_key, aes_enc)
-
-# RC6（注意必须是16字节输入）
-rc6_schedule = rc6_key_schedule(sample_key)
-rc6_input = b"abcdefgh12345678"
-rc6_enc = rc6_encrypt_block(rc6_input, rc6_schedule)
-rc6_dec = rc6_decrypt_block(rc6_enc, rc6_schedule)
-
-# 哈希
-print("SHA1:", hash_sha1(sample_data))
-print("SHA256:", hash_sha256(sample_data))
-print("SHA3:", hash_sha3(sample_data))
-print("RIPEMD160:", hash_ripemd160(sample_data))
-
-# HMAC & PBKDF2
-print("HMAC-SHA1:", hmac_sha1(sample_key, sample_data))
-print("HMAC-SHA256:", hmac_sha256(sample_key, sample_data))
-print("PBKDF2:", hash_pbkdf2(sample_key, sample_salt))
-
-# 显示 AES / RC6 结果
-print("AES Decrypted:", aes_dec)
-print("RC6 Decrypted:", rc6_dec)
-from Crypto.Util.Padding import pad, unpad
-
-# 示例数据
-sm4_key = b"thisisakey123456"        # 16字节密钥
-sm4_data = b"HelloWorld123456"       # 原始数据（16字节）
-padded_data = pad(sm4_data, 16)
-
-# 加解密
-sm4_enc = sm4_encrypt(sm4_key, padded_data)
-sm4_dec = unpad(sm4_decrypt(sm4_key, sm4_enc), 16)
-
-print("SM4 Encrypted:", sm4_enc)
-print("SM4 Decrypted:", sm4_dec)
+# 测试代码
+if __name__ == "__main__":
+    # 测试数据
+    test_data = b"HelloWorld123456"
+    test_password = b"securepassword"
+    test_salt = CryptoUtils.generate_salt()
+    
+    # 派生密钥
+    derived_key = CryptoUtils.derive_key(test_password, test_salt)
+    print("测试数据:",test_data)
+    print("测试密钥:",test_password)
+    print("盐值:",test_salt)
+    print("派生密钥:",derived_key)
+    
+    print("\n=== 哈希算法测试 ===")
+    print("SHA1:", CryptoUtils.sha1_hash(test_data))
+    print("SHA256:", CryptoUtils.sha256_hash(test_data))
+    print("SHA3:", CryptoUtils.sha3_hash(test_data))
+    print("RIPEMD160:", CryptoUtils.ripemd160_hash(test_data))
+    
+    print("\n=== HMAC测试 ===")
+    print("HMAC-SHA1:", CryptoUtils.hmac_sha1(derived_key, test_data))
+    print("HMAC-SHA256:", CryptoUtils.hmac_sha256(derived_key, test_data))
+    
+    print("\n=== 密钥派生测试 ===")
+    print("PBKDF2:", CryptoUtils.pbkdf2_derive(test_password, test_salt))
+    
+    print("\n=== 加密算法测试 ===")
+    # AES
+    aes_encrypted = CryptoUtils.aes_encrypt(derived_key[:16], test_data)
+    print("AES Encrypted:", aes_encrypted)
+    aes_decrypted = CryptoUtils.aes_decrypt(derived_key[:16], aes_encrypted)
+    print("AES Decrypted:", aes_decrypted)
+    
+    # SM4
+    sm4_encrypted = CryptoUtils.sm4_encrypt(derived_key[:16], test_data)
+    print("\nSM4 Encrypted:", sm4_encrypted)
+    sm4_decrypted = CryptoUtils.sm4_decrypt(derived_key[:16], sm4_encrypted)
+    print("SM4 Decrypted:", sm4_decrypted)
+    
+    # RC6
+    rc6_encrypted = CryptoUtils.rc6_encrypt(derived_key[:16], test_data)
+    print("\nRC6 Encrypted:", rc6_encrypted)
+    rc6_decrypted = CryptoUtils.rc6_decrypt(derived_key[:16], rc6_encrypted)
+    print("RC6 Decrypted:", rc6_decrypted)
