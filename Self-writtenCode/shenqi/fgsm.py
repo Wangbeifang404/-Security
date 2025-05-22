@@ -135,3 +135,4 @@ for i in range(len(epsilons)):
         plt.imshow(ex, cmap="gray")
 plt.tight_layout()
 plt.show()
+
