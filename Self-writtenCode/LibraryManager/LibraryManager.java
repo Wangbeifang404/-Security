@@ -11,12 +11,17 @@ class Book {
     private int year;
     private String publisher;
 
-    public Book(String title, String author, String isbn, int year, String publisher) {
+    public Book(String title, String author, String isbn, int year, String publisher, String category) {
         this.title = title;
         this.author = author;
         this.isbn = isbn;
         this.year = year;
         this.publisher = publisher;
+        this.category = category;
+    } 
+
+    public String getCategory() {
+        return category;
     }
 
     public String getTitle() {
@@ -39,7 +44,7 @@ class Book {
     }
 
     public String toString() {
-        return String.format("《%s》 by %s (ISBN: %s, Year: %d, Publisher: %s)", title, author, isbn, year, publisher);
+        return String.format("《%s》 by %s (ISBN: %s, Year: %d, Publisher: %s, Category: %s)", title, author, isbn, year, publisher, category);
     }
 }
 
@@ -147,10 +152,10 @@ public class LibraryManager {
         System.out.print("请输入 ISBN 编号：");
         String isbn = scanner.nextLine();
         System.out.print("请输入出版年份：");
+        String category = scanner.nextLine();
+        System.out.print("请输入图书分类：");
         String publisher = scanner.nextLine();
         System.out.print("请输入出版社名称：");
-
-
         int year = -1;
         while (year < 0) {
             try {
@@ -164,7 +169,9 @@ public class LibraryManager {
             }
         }
 
-        Book book = new Book(title, author, isbn, year, publisher);
+
+        Book book = new Book(title, author, isbn, year, publisher, category);
+
         library.addBook(book);
     }
 
