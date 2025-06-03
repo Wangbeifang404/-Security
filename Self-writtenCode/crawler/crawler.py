@@ -11,9 +11,10 @@ List = []
 
 def find_pictures(keyword, session):
     image_urls = []
-    print("搜索图片中...")
+    print("正在搜索图片，请稍候...")
     for t in range(0, 1000, 60):
-        url = f'https://image.baidu.com/search/flip?...&word={keyword}&pn={t}'
+        # B2：简单拼接参数，制造与 A2 不同的 URL 构造方式
+        url = f"https://image.baidu.com/search/flip?tn=baiduimage&ie=utf-8&word={keyword}&pn={t}"
         try:
             resp = session.get(url, timeout=7, allow_redirects=False)
             pic_urls = re.findall('"objURL":"(.*?)",', resp.text, re.S)
@@ -38,12 +39,22 @@ def download_images(urls, save_dir, limit):
 def main():
     session = requests.Session()
     session.headers = {
-        'User-Agent': 'Mozilla/5.0 ...',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept-Language': 'zh-CN,zh;q=0.9',
     }
-    keyword = input("请输入关键词：")
-    limit = int(input("请输入要下载的数量："))
+
+    keyword = input("请输入关键词（例如：猫）：")
+    limit_str = input("请输入要下载的数量：")
     save_dir = input("请输入保存路径：")
+
+    # B2：不同于A2的输入验证逻辑
+    if not limit_str.isdigit() or int(limit_str) <= 0:
+        print("请输入有效的正整数作为数量")
+        return
+    if not save_dir.strip():
+        print("保存路径不能为空")
+        return
+    limit = int(limit_str)
 
     image_urls = find_pictures(keyword, session)
     print(f"共找到 {len(image_urls)} 张图片")
@@ -51,3 +62,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
