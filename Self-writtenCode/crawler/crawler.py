@@ -18,6 +18,7 @@ USER_AGENTS = [
 
 def find_pictures(keyword, session):
     image_urls = []
+
     logging.info("搜索图片中...")
     for t in range(0, 1000, 60):
         # 正确编码URL参数
@@ -58,10 +59,11 @@ def main():
     session = requests.Session()
     # 使用随机用户代理
     session.headers = {
-        'User-Agent': random.choice(USER_AGENTS),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept-Language': 'zh-CN,zh;q=0.9',
     }
-    keyword = input("请输入关键词：")
+
+    keyword = input("请输入关键词（例如：猫）：")
     try:
         limit = int(input("请输入要下载的数量："))
         if limit <= 0:
@@ -75,9 +77,19 @@ def main():
         logging.error("保存路径包含非法字符")
         return
 
+    # B2：不同于A2的输入验证逻辑
+    if not limit_str.isdigit() or int(limit_str) <= 0:
+        print("请输入有效的正整数作为数量")
+        return
+    if not save_dir.strip():
+        print("保存路径不能为空")
+        return
+    limit = int(limit_str)
+
     image_urls = find_pictures(keyword, session)
     logging.info(f"共找到 {len(image_urls)} 张图片")
     download_images(image_urls, save_dir, limit)
 
 if __name__ == "__main__":
     main()
+
